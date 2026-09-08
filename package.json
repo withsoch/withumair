@@ -1,0 +1,14 @@
+{
+  "name": "withumair",
+  "version": "1.0.0",
+  "private": true,
+  "description": "withumair.com - static site mirror (served from withumair/withumair.com) plus the markdown-driven blog generator. Vercel's Root Directory is withumair/withumair.com, so nothing in this file affects the deploy; it exists only so scripts/build-blog.mjs can be run locally and in CI.",
+  "type": "module",
+  "scripts": {
+    "build:blog": "node scripts/build-blog.mjs"
+  },
+  "devDependencies": {
+    "gray-matter": "^4.0.3",
+    "marked": "^15.0.7"
+  }
+}

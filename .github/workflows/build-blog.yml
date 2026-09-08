@@ -1,0 +1,57 @@
+name: Build blog
+
+# withumair.com is a static HTTrack mirror with no build step, and Vercel's
+# Root Directory for this project is `withumair/withumair.com`. The Soch SEO
+# pipeline (n8n gkNsOpDjnRF1SNGe) commits markdown to content/blog/ exactly as
+# it does for the Next.js sites; this workflow renders that markdown into real
+# static HTML inside the served directory and commits the result, which is what
+# Vercel then deploys.
+#
+# Trigger is content/blog/** and public/blog/** only, and the commit only ever
+# touches withumair/withumair.com/blog/** - so the bot's own commit cannot
+# re-trigger this workflow.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "content/blog/**"
+      - "public/blog/**"
+      - "scripts/build-blog.mjs"
+      - ".github/workflows/build-blog.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-blog
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install generator dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Render blog
+        run: node scripts/build-blog.mjs
+
+      - name: Commit rendered pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add withumair/withumair.com/blog
+          if git diff --cached --quiet; then
+            echo "No blog changes to commit."
+            exit 0
+          fi
+          git commit -m "blog: rebuild static pages [skip vercel-noop]"
+          git push
