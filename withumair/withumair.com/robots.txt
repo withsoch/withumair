@@ -1,0 +1,6 @@
+# Open to every crawler, AI search crawlers included: a site they cannot read
+# is a site they never cite.
+User-agent: *
+Allow: /
+
+Sitemap: https://www.withumair.com/sitemap.xml

@@ -82,6 +82,34 @@ function resolveImage(src) {
   return s;
 }
 
+/** A post's FAQ as questions and answers: the "## FAQ" / "## Frequently Asked
+ *  Questions" section, "### question" then its answer, up to the next "##". */
+function faqFromMarkdown(body) {
+  const lines = String(body).replace(/\r/g, "").split("\n");
+  const start = lines.findIndex((l) => /^##\s+(faq\b|frequently asked questions)/i.test(l.trim()));
+  if (start < 0) return [];
+  const plain = (md) =>
+    md
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/[*_`]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  const items = [];
+  let cur = null;
+  for (const raw of lines.slice(start + 1)) {
+    const line = raw.trim();
+    if (/^##\s/.test(line) || line.startsWith("<!--")) break;
+    const q = line.match(/^###\s+(.+)$/);
+    if (q) {
+      if (cur) items.push({ question: cur.q, answer: plain(cur.a.join(" ")) });
+      cur = { q: plain(q[1]), a: [] };
+    } else if (cur && line) cur.a.push(line);
+  }
+  if (cur) items.push({ question: cur.q, answer: plain(cur.a.join(" ")) });
+  return items.filter((i) => i.question && i.answer);
+}
+
 function slugifyHeading(text) {
   return String(text)
     .toLowerCase()
@@ -255,7 +283,7 @@ function shell({ title, description, canonical, image, body, jsonLd }) {
 ${image ? `<meta property="og:image" content="${esc(image)}">\n<meta name="twitter:card" content="summary_large_image">` : '<meta name="twitter:card" content="summary">'}
 ${FONT_LINK}
 <style>${STYLES}</style>
-${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>` : ""}
+${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, "\\u003c")}</script>` : ""}
 </head>
 <body>
 <header class="site-head"><div class="wrap">
@@ -401,17 +429,75 @@ function buildPost(post) {
     canonical,
     image: absImage,
     body,
-    jsonLd: {
-      "@context": "https://schema.org",
-      "@type": "BlogPosting",
-      headline: post.title,
-      description: post.excerpt || undefined,
-      datePublished: post.date || undefined,
-      image: absImage || undefined,
-      mainEntityOfPage: { "@type": "WebPage", "@id": canonical },
-      author: { "@type": "Person", name: SITE.name, url: SITE.home },
-    },
+    jsonLd: [
+      {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        headline: post.title,
+        description: post.excerpt || undefined,
+        datePublished: post.date || undefined,
+        dateModified: post.date || undefined,
+        image: absImage || undefined,
+        mainEntityOfPage: { "@type": "WebPage", "@id": canonical },
+        author: { "@type": "Person", name: SITE.name, url: SITE.home },
+        publisher: { "@type": "Person", name: SITE.name, url: SITE.home },
+      },
+      ...faqJsonLd(post.body),
+    ],
   });
+}
+
+/** FAQPage structured data for a post, or nothing when it has no FAQ. */
+function faqJsonLd(body) {
+  const faq = faqFromMarkdown(body);
+  if (!faq.length) return [];
+  return [
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      mainEntity: faq.map((i) => ({
+        "@type": "Question",
+        name: i.question,
+        acceptedAnswer: { "@type": "Answer", text: i.answer },
+      })),
+    },
+  ];
+}
+
+/** sitemap.xml at the site root: home, the blog index and every post. */
+function buildSitemap(posts) {
+  const urls = [
+    { loc: SITE.home },
+    { loc: SITE.blog },
+    ...posts.map((p) => ({ loc: `${SITE.blog}${p.slug}/`, lastmod: p.date || "" })),
+  ];
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls
+  .map((u) => `  <url><loc>${esc(u.loc)}</loc>${u.lastmod ? `<lastmod>${esc(u.lastmod)}</lastmod>` : ""}</url>`)
+  .join("\n")}
+</urlset>
+`;
+}
+
+/** llms.txt at the site root: who this is, and every post with its summary (llmstxt.org). */
+function buildLlmsTxt(posts) {
+  const list = posts
+    .map((p) => `- [${p.title}](${SITE.blog}${p.slug}/)${p.excerpt ? `: ${p.excerpt}` : ""}`)
+    .join("\n");
+  return `# ${SITE.name}
+
+> ${SITE.tagline} Umair Shahzad helps founders and operators build the LinkedIn presence that wins clients and investor conversations.
+
+## Pages
+
+- [Home](${SITE.home})
+- [Blog](${SITE.blog})
+
+## Posts
+
+${list || "(none yet)"}
+`;
 }
 
 function copyMedia() {
@@ -459,6 +545,9 @@ function main() {
   }
 
   const media = copyMedia();
+
+  fs.writeFileSync(path.join(SERVE_DIR, "sitemap.xml"), buildSitemap(posts), "utf8");
+  fs.writeFileSync(path.join(SERVE_DIR, "llms.txt"), buildLlmsTxt(posts), "utf8");
 
   console.log(
     `build-blog: ${posts.length} post(s), ${media} image(s) -> ${path.relative(ROOT, OUT_BLOG)}`,
